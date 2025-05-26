@@ -433,7 +433,7 @@ export default function Home() {
 
   return (
     <main className="flex min-h-screen flex-col items-center p-6 md:p-12">
-      <h1 className="text-3xl md:text-4xl font-bold mb-8 text-center">我的学习记录</h1>
+      <h1 className="text-3xl md:text-4xl font-bold mb-8 text-center">学习记录</h1>
 
       <div className="w-full max-w-4xl"> {/* Increased max-width */}
         <div className="mb-8 p-4 bg-white shadow-md rounded-lg"> {/* Card-like container for tags */}
