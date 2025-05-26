@@ -2,14 +2,42 @@ import { NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
 
 const sql = neon(process.env.POSTGRES_URL);
+const DEFAULT_RECORDS_LIMIT = 10; // Let's use 10 for easier testing of pagination
 
-// 处理 GET 请求: 获取所有学习记录 (包含分类名称)
 export async function GET(request) {
+  const requestUrl = request.url;
+  console.log(`[API /api/records GET] Received request: ${requestUrl}`);
+
   try {
-    // 使用 LEFT JOIN 来连接 learning_records 和 categories 表
-    // 即使记录没有分类 (category_id IS NULL)，也会被查询出来
-    // c.name AS category_name 用于给分类名称一个别名
-    const records = await sql`
+    const { searchParams } = new URL(requestUrl);
+    let page = parseInt(searchParams.get('page') || '1', 10);
+    let limit = parseInt(searchParams.get('limit') || DEFAULT_RECORDS_LIMIT.toString(), 10);
+    const categoryIdParam = searchParams.get('categoryId'); // Get categoryId from query
+
+    if (isNaN(page) || page < 1) page = 1;
+    if (isNaN(limit) || limit < 1) limit = DEFAULT_RECORDS_LIMIT;
+
+    const offset = (page - 1) * limit;
+
+    let whereClauses = [];
+    const queryParams = []; // Parameters for the WHERE clauses (e.g., categoryId)
+    let paramIndex = 1;
+
+    // Add categoryId filter if present and valid
+    if (categoryIdParam) {
+      const categoryId = parseInt(categoryIdParam, 10);
+      if (!isNaN(categoryId)) {
+        whereClauses.push(`lr.category_id = $${paramIndex++}`);
+        queryParams.push(categoryId);
+        console.log(`[API /api/records GET] Filtering by categoryId: ${categoryId}`);
+      } else {
+        console.warn(`[API /api/records GET] Invalid categoryId parameter received: ${categoryIdParam}`);
+      }
+    }
+
+    const whereCondition = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+    const recordsQueryString = `
       SELECT
         lr.id,
         lr.title,
@@ -21,18 +49,51 @@ export async function GET(request) {
         learning_records lr
       LEFT JOIN
         categories c ON lr.category_id = c.id
+      ${whereCondition}
       ORDER BY
-        lr.created_at DESC;
+        lr.created_at DESC
+      LIMIT $${paramIndex++} OFFSET $${paramIndex++}; 
     `;
-    return NextResponse.json(records);
+    const recordsParamsFinal = [...queryParams, limit, offset]; // Combine filter params with pagination params
+
+    const countQueryString = `
+      SELECT COUNT(lr.id) AS total_count 
+      FROM learning_records lr
+      ${whereCondition};
+    `;
+    const countParamsFinal = [...queryParams]; // Only filter params for count
+
+    console.log(`[API /api/records GET] Executing records query: ${recordsQueryString.replace(/\s+/g, ' ').trim()} with params:`, recordsParamsFinal);
+    const fetchedRecords = await sql.query(recordsQueryString, recordsParamsFinal);
+
+    console.log(`[API /api/records GET] Executing count query: ${countQueryString.replace(/\s+/g, ' ').trim()} with params:`, countParamsFinal);
+    const totalCountResult = await sql.query(countQueryString, countParamsFinal);
+
+    let totalRecords = 0;
+    if (totalCountResult && totalCountResult.length > 0 && totalCountResult[0].total_count !== undefined) {
+      totalRecords = parseInt(totalCountResult[0].total_count, 10);
+    } else {
+      console.error(`[API /api/records GET] Failed to retrieve total_count. totalCountResult:`, totalCountResult);
+    }
+
+    console.log(`[API /api/records GET] Responding with ${fetchedRecords.length} records for page ${page}. Total records matching filter: ${totalRecords}. Limit: ${limit}`);
+    return NextResponse.json({
+      records: fetchedRecords,
+      totalRecords,
+      currentPage: page,
+      totalPages: Math.ceil(totalRecords / limit),
+      limit: limit
+    });
+
   } catch (error) {
-    console.error('获取学习记录失败:', error);
+    console.error('[API /api/records GET] Critical error fetching paginated records:', error, error.stack);
     return NextResponse.json(
-      { message: '获取学习记录失败', error: error.message },
+      { message: '获取学习记录失败 (分页)', error: error.message },
       { status: 500 }
     );
   }
 }
+
 
 // 处理 POST 请求: 创建新的学习记录
 export async function POST(request) {

@@ -160,3 +160,56 @@ export async function PUT(request, context) {
     );
   }
 }
+
+export async function DELETE(request, context) {
+  let recordId;
+  try {
+    if (!context || !context.params || typeof context.params.id === 'undefined') {
+      return NextResponse.json({ message: '请求参数错误，无法获取记录ID' }, { status: 400 });
+    }
+    recordId = parseInt(context.params.id, 10);
+  } catch (e) {
+    return NextResponse.json({ message: '记录ID解析失败' }, { status: 400 });
+  }
+
+  if (isNaN(recordId)) {
+    return NextResponse.json({ message: '记录ID无效' }, { status: 400 });
+  }
+
+  try {
+    const result = await sql.query(
+      `DELETE FROM learning_records WHERE id = $1 RETURNING id;`, // RETURNING id helps confirm deletion
+      [recordId]
+    );
+
+    // The 'result' object from sql.query for DELETE usually contains 'rowCount'.
+    // If using `postgres.js` (which @neondatabase/serverless might wrap or be similar to),
+    // a DELETE query returns an array of the deleted rows if RETURNING is used,
+    // or an object with rowCount. Let's check rowCount.
+    // If `result` is an array from RETURNING, its length would indicate rows affected.
+    // If `result` is an object like {rowCount: 1}, we use that.
+    // Based on previous experience with sql.query directly returning arrays for SELECT,
+    // it might return an array for RETURNING as well.
+
+    let deletedCount = 0;
+    if (Array.isArray(result)) {
+        deletedCount = result.length;
+    } else if (result && typeof result.rowCount !== 'undefined') {
+        deletedCount = result.rowCount;
+    }
+
+    console.log(`Deletion result for ID ${recordId}:`, result, `Deleted count: ${deletedCount}`);
+
+    if (deletedCount === 0) {
+      return NextResponse.json({ message: '未找到要删除的记录，或记录未被删除' }, { status: 404 });
+    }
+
+    return NextResponse.json({ message: `记录 ID ${recordId} 已成功删除` }); // Or return status 204 No Content
+  } catch (error) {
+    console.error(`删除记录ID ${recordId} 失败:`, error, error.stack);
+    return NextResponse.json(
+      { message: '删除学习记录失败', error: error.message },
+      { status: 500 }
+    );
+  }
+}
