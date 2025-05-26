@@ -31,6 +31,11 @@ export default function Home() {
   const [totalPages, setTotalPages] = useState(0);
   // const [totalRecords, setTotalRecords] = useState(0); // Optional: if you want to display total count
   const [isLoadingMoreRecords, setIsLoadingMoreRecords] = useState(false); // For "Load More" button
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [addCategoryLoading, setAddCategoryLoading] = useState(false);
+  const [addCategoryError, setAddCategoryError] = useState('');
+  const [addCategorySuccess, setAddCategorySuccess] = useState('');
+  const [isAddCategoryModalOpen, setIsAddCategoryModalOpen] = useState(false);
 
   const handleSaveRecord = async (event) => {
     event.preventDefault();
@@ -172,6 +177,63 @@ export default function Home() {
       } else {
         setIsLoadingMoreRecords(false);
       }
+    }
+  };
+
+  const fetchCategories = async () => {
+    try {
+      // Optional: you might want a loading state for categories if it's not already handled
+      const response = await fetch('/api/categories');
+      if (!response.ok) {
+        throw new Error('获取分类列表失败');
+      }
+      const data = await response.json();
+      setCategories(data); // Assumes 'setCategories' is your state setter for the categories list
+    } catch (error) {
+      console.error("Error fetching categories:", error);
+      // Display this error to the user if desired, perhaps using 'addCategoryError' or a general error state
+      setAddCategoryError(error.message || '获取分类列表时出错');
+    }
+  };
+
+  const handleAddNewCategory = async (event) => {
+    event.preventDefault(); // If you place the input and button inside a <form>
+    setAddCategoryLoading(true);
+    setAddCategoryError('');
+    setAddCategorySuccess('');
+
+    if (!newCategoryName.trim()) {
+      setAddCategoryError('分类名称不能为空！');
+      setAddCategoryLoading(false);
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/categories', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name: newCategoryName.trim() }),
+      });
+
+      const responseData = await response.json();
+
+      if (!response.ok) {
+        // API returns specific messages for errors like duplicate name (409) or bad request (400)
+        throw new Error(responseData.message || `添加分类失败 (状态码: ${response.status})`);
+      }
+
+      setAddCategorySuccess(`分类 "${responseData.name}" 添加成功！`);
+      setNewCategoryName(''); // Clear the input field
+      await fetchCategories(); // Refresh the category list to show the new one
+      setIsAddCategoryModalOpen(false); // <<<< CLOSE THE MODAL
+
+    } catch (err) {
+      console.error("添加新分类时出错:", err);
+      setAddCategoryError(err.message || '添加新分类时发生未知错误');
+    } finally {
+      setAddCategoryLoading(false);
     }
   };
 
@@ -351,6 +413,7 @@ export default function Home() {
       }
     }
     fetchInitialCategories();
+    fetchCategories(); // Call the dedicated function
 
     // Fetch records for the current selectedCategory (or all if null) for page 1
     console.log(`useEffect triggered: selectedCategory is ${selectedCategory}. Fetching page 1.`);
@@ -397,7 +460,21 @@ export default function Home() {
                 {category.name}
               </button>
             ))}
-            {/* TODO: Add a way to create new categories from the UI later */}
+            <button
+              onClick={() => {
+                setIsAddCategoryModalOpen(true);
+                setNewCategoryName(''); // Clear previous input
+                setAddCategoryError('');   // Clear previous error
+                setAddCategorySuccess(''); // Clear previous success
+              }}
+              className="p-2 bg-green-500 hover:bg-green-600 text-white rounded-full shadow-md transition-transform hover:scale-110 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
+              aria-label="添加新分类"
+            >
+              {/* SVG for a Plus Icon (Heroicons example) */}
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
+              </svg>
+            </button>
           </div>
         </div>
 
@@ -582,6 +659,68 @@ export default function Home() {
           </div>
         </div>
       </div>
+      {isAddCategoryModalOpen && (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 transition-opacity duration-300 ease-in-out"> {/* Overlay */}
+    <div className="bg-white p-6 md:p-8 rounded-lg shadow-xl w-full max-w-md transform transition-all duration-300 ease-in-out scale-100 opacity-100"> {/* Modal Content */}
+      <div className="flex justify-between items-center mb-6">
+        <h3 className="text-xl font-semibold text-gray-800">添加新分类</h3>
+        <button 
+          onClick={() => setIsAddCategoryModalOpen(false)}
+          className="text-gray-400 hover:text-gray-600 transition-colors"
+          aria-label="关闭对话框"
+        >
+          {/* SVG for a Close Icon (Heroicons example) */}
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <form onSubmit={handleAddNewCategory}> {/* We reuse the existing handler */}
+        <div className="space-y-4">
+          <div>
+            <label htmlFor="modalNewCategoryName" className="block text-sm font-medium text-gray-700 mb-1">
+              分类名称 <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              id="modalNewCategoryName" // Ensure unique ID if old input is still somewhere hidden
+              value={newCategoryName}
+              onChange={(e) => {
+                setNewCategoryName(e.target.value);
+                setAddCategoryError(''); 
+                setAddCategorySuccess('');
+              }}
+              className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm text-gray-900"
+              placeholder="输入新分类名称"
+              autoFocus // Automatically focus on the input field when modal opens
+            />
+          </div>
+
+          {addCategoryError && <p className="text-sm text-red-600 bg-red-100 p-2 rounded-md">{addCategoryError}</p>}
+          {addCategorySuccess && <p className="text-sm text-green-600 bg-green-100 p-2 rounded-md">{addCategorySuccess}</p>}
+        </div>
+
+        <div className="mt-6 flex justify-end space-x-3">
+          <button
+            type="button" // Important: not submit, to prevent double submission if form also submits
+            onClick={() => setIsAddCategoryModalOpen(false)}
+            className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors"
+          >
+            取消
+          </button>
+          <button
+            type="submit"
+            disabled={addCategoryLoading}
+            className="px-4 py-2 text-sm font-medium text-white bg-teal-600 hover:bg-teal-700 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-offset-2 transition-colors disabled:opacity-50"
+          >
+            {addCategoryLoading ? '添加中...' : '确认添加'}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+)}
     </main>
   );
 }
