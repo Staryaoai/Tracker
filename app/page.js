@@ -1,10 +1,12 @@
 'use client'; // Add this at the top
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation'; // Import useRouter
 import { format, subDays, subMonths, subYears, startOfDay, endOfDay } from 'date-fns';
 const RECORDS_PER_PAGE = 10; // Match the DEFAULT_RECORDS_LIMIT from backend or choose a value
 
 export default function Home() {
+   // =========== 1. ALL HOOKS AT THE TOP ============
   const [categories, setCategories] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState(null); // null for 'All Records'
   const [newTitle, setNewTitle] = useState('');
@@ -27,6 +29,8 @@ export default function Home() {
     { value: 'past_year', label: '过去一年' },
     { value: 'all_time', label: '所有时间' },
   ];
+  const [isSummarizing, setIsSummarizing] = useState(false);
+  const [summaryError, setSummaryError] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
   // const [totalRecords, setTotalRecords] = useState(0); // Optional: if you want to display total count
@@ -36,11 +40,69 @@ export default function Home() {
   const [addCategoryError, setAddCategoryError] = useState('');
   const [addCategorySuccess, setAddCategorySuccess] = useState('');
   const [isAddCategoryModalOpen, setIsAddCategoryModalOpen] = useState(false);
+  const router = useRouter(); // Initialize router
+  const [isClient, setIsClient] = useState(false); // To ensure sessionStorage is accessed only on client
+  const [isGuest, setIsGuest] = useState(false); // Track if current user is a guest
 
+
+  // =========== 2. EFFECTS (still hooks, so at top level) ============
+  useEffect(() => {
+    // This effect runs once on the client after hydration
+    setIsClient(true); 
+    const isAuthenticated = sessionStorage.getItem('isAuthenticated');
+    const guestMode = sessionStorage.getItem('isGuest') === 'true';
+    setIsGuest(guestMode);
+    
+    if (isAuthenticated !== 'true') {
+      router.replace('/login'); // Use replace to avoid login page in history stack
+    }
+  }, [router]); // Add router to dependency array
+
+  useEffect(() => {
+    if (isClient && sessionStorage.getItem('isAuthenticated') === 'true') {
+      // Fetch categories and records for the current selectedCategory (or all if null) for page 1
+      console.log(`useEffect (data fetch) triggered: selectedCategory is ${selectedCategory}. Fetching page 1.`);
+      
+      const fetchData = async () => {
+        try {
+          // Fetch categories
+          await fetchCategories(); 
+          
+          // Reset pagination and fetch records
+          setCurrentPage(1); 
+          setTotalPages(0);  
+          await fetchRecords(1, selectedCategory); 
+        } catch (error) {
+          console.error("Error fetching initial data:", error);
+        }
+      };
+      
+      fetchData();
+    }
+  }, [selectedCategory, isClient]); // Dependencies: selectedCategory changes and client-side check
+
+  if (!isClient || sessionStorage.getItem('isAuthenticated') !== 'true') {
+    // Render nothing or a loading spinner while checking auth / redirecting
+    // This prevents a flash of the main page content if not authenticated
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-100">
+        <p className="text-gray-600">加载中或正在重定向...</p>
+      </div>
+    );
+  }
+
+
+  // =========== 3. HANDLERS (functions) ============
   const handleSaveRecord = async (event) => {
     event.preventDefault();
     setError('');
     setSuccessMessage('');
+
+    // 检查游客模式
+    if (isGuest) {
+      setError('游客模式下无法添加或编辑记录，请登录后操作！');
+      return;
+    }
 
     if (!newTitle.trim()) {
       setError('标题不能为空！');
@@ -114,6 +176,12 @@ export default function Home() {
   };
 
   const handleEditRecord = (record) => {
+    // 检查游客模式
+    if (isGuest) {
+      setError('游客模式下无法编辑记录，请登录后操作！');
+      return;
+    }
+
     setEditingRecordId(record.id);
     setNewTitle(record.title);
     setNewContent(record.content || ''); // Ensure content is not null/undefined for the textarea
@@ -201,6 +269,13 @@ export default function Home() {
     setAddCategoryLoading(true);
     setAddCategoryError('');
     setAddCategorySuccess('');
+
+    // 检查游客模式
+    if (isGuest) {
+      setAddCategoryError('游客模式下无法添加分类，请登录后操作！');
+      setAddCategoryLoading(false);
+      return;
+    }
 
     if (!newCategoryName.trim()) {
       setAddCategoryError('分类名称不能为空！');
@@ -331,7 +406,108 @@ export default function Home() {
     }
   };
 
+  const handleSummary = async () => {
+    setIsSummarizing(true);
+    setSummaryError('');
+
+    let startDateStr = '';
+    let endDateStr = '';
+    const today = new Date();
+
+    // 使用与导出相同的日期范围逻辑
+    switch (selectedExportRange) {
+      case 'today':
+        startDateStr = format(startOfDay(today), 'yyyy-MM-dd');
+        endDateStr = format(endOfDay(today), 'yyyy-MM-dd');
+        break;
+      case 'past_7_days':
+        startDateStr = format(startOfDay(subDays(today, 6)), 'yyyy-MM-dd');
+        endDateStr = format(endOfDay(today), 'yyyy-MM-dd');
+        break;
+      case 'past_30_days':
+        startDateStr = format(startOfDay(subDays(today, 29)), 'yyyy-MM-dd');
+        endDateStr = format(endOfDay(today), 'yyyy-MM-dd');
+        break;
+      case 'past_year':
+        startDateStr = format(startOfDay(subYears(today, 1)), 'yyyy-MM-dd');
+        endDateStr = format(endOfDay(today), 'yyyy-MM-dd');
+        break;
+      case 'all_time':
+      default:
+        // No date parameters needed for all time
+        break;
+    }
+
+    const params = new URLSearchParams();
+    if (startDateStr) {
+      params.append('startDate', startDateStr);
+    }
+    if (endDateStr) {
+      params.append('endDate', endDateStr);
+    }
+    const queryString = params.toString();
+
+    console.log(`Generating summary with range: ${selectedExportRange}, startDate: ${startDateStr}, endDate: ${endDateStr}`);
+
+    try {
+      const response = await fetch(`/api/records/summary${queryString ? `?${queryString}` : ''}`);
+
+      if (!response.ok) {
+        let errorResponseMessage = `生成总结失败 (状态码: ${response.status})`;
+        let rawErrorText = '';
+        try {
+          rawErrorText = await response.text();
+          console.error('服务器返回的原始错误响应:', rawErrorText);
+          const errorData = JSON.parse(rawErrorText);
+          if (errorData && errorData.message) {
+            errorResponseMessage = errorData.message;
+          } else {
+            errorResponseMessage = `生成总结失败: ${rawErrorText.substring(0, 200)}`;
+          }
+        } catch (e) {
+          console.warn('无法将错误响应解析为JSON:', e);
+          if (rawErrorText) {
+            errorResponseMessage = `生成总结失败 (状态码: ${response.status})。服务器响应: ${rawErrorText.substring(0, 200)}...`;
+          } else {
+            errorResponseMessage = `生成总结失败 (状态码: ${response.status})，且无法读取错误内容。`;
+          }
+        }
+        throw new Error(errorResponseMessage);
+      }
+
+      const data = await response.json();
+      const summaryContent = data.summary;
+
+      // 创建下载文件
+      const blob = new Blob([summaryContent], { type: 'text/markdown;charset=utf-8' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+
+      const currentDate = new Date();
+      const formattedCurrentDate = `${currentDate.getFullYear()}${(currentDate.getMonth()+1).toString().padStart(2, '0')}${currentDate.getDate().toString().padStart(2, '0')}`;
+      let fileName = `learning_summary_${selectedExportRange}_${formattedCurrentDate}.md`;
+
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(link.href);
+
+    } catch (err) {
+      console.error("生成AI总结时捕获到错误:", err, err.stack);
+      setSummaryError(err.message || '生成AI总结时发生未知错误，请查看控制台日志。');
+    } finally {
+      setIsSummarizing(false);
+    }
+  };
+
   const handleDeleteRecord = async (recordId) => {
+    // 检查游客模式
+    if (isGuest) {
+      setError('游客模式下无法删除记录，请登录后操作！');
+      return;
+    }
+
     // Confirmation dialog
     if (!window.confirm(`您确定要删除这条记录吗？此操作无法撤销。`)) {
       return; // User cancelled
@@ -400,31 +576,7 @@ export default function Home() {
     }
   };
 
-  // Fetch categories from the API
-  useEffect(() => {
-    // Fetch categories (this part remains the same)
-    async function fetchInitialCategories() {
-      try {
-        const catResponse = await fetch('/api/categories');
-        if (!catResponse.ok) throw new Error('Failed to fetch categories');
-        setCategories(await catResponse.json());
-      } catch (error) {
-        console.error("Error fetching categories:", error);
-      }
-    }
-    fetchInitialCategories();
-    fetchCategories(); // Call the dedicated function
 
-    // Fetch records for the current selectedCategory (or all if null) for page 1
-    console.log(`useEffect triggered: selectedCategory is ${selectedCategory}. Fetching page 1.`);
-    setCurrentPage(1); // Reset to page 1 before fetching
-    setTotalPages(0);  // Reset total pages
-    fetchRecords(1, selectedCategory);
-
-  }, [selectedCategory]); // Re-run when selectedCategory changes
-
-  // Modified useEffect for initial data fetching
-  
   const handleSelectCategory = (categoryId) => {
     setSelectedCategory(categoryId);
     // Later, we will fetch records based on this categoryId
@@ -434,6 +586,25 @@ export default function Home() {
   return (
     <main className="flex min-h-screen flex-col items-center p-6 md:p-12">
       <h1 className="text-3xl md:text-4xl font-bold mb-8 text-center">学习记录</h1>
+      
+      {/* 游客模式状态提示 */}
+      {isGuest && (
+        <div className="w-full max-w-4xl mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+          <div className="flex items-center">
+            <div className="flex-shrink-0">
+              <svg className="h-5 w-5 text-blue-400" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+              </svg>
+            </div>
+            <div className="ml-3">
+              <p className="text-sm text-blue-800">
+                <strong>游客模式</strong> - 您当前处于只读模式，可以浏览和导出记录，但无法进行添加、编辑、删除操作。
+                <a href="/login" className="ml-2 underline hover:text-blue-900">点击此处登录</a> 以获得完整功能。
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="w-full max-w-4xl"> {/* Increased max-width */}
         <div className="mb-8 p-4 bg-white shadow-md rounded-lg"> {/* Card-like container for tags */}
@@ -462,13 +633,23 @@ export default function Home() {
             ))}
             <button
               onClick={() => {
+                if (isGuest) {
+                  setAddCategoryError('游客模式下无法添加分类，请登录后操作！');
+                  return;
+                }
                 setIsAddCategoryModalOpen(true);
                 setNewCategoryName(''); // Clear previous input
                 setAddCategoryError('');   // Clear previous error
                 setAddCategorySuccess(''); // Clear previous success
               }}
-              className="p-2 bg-green-500 hover:bg-green-600 text-white rounded-full shadow-md transition-transform hover:scale-110 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
-              aria-label="添加新分类"
+              disabled={isGuest}
+              className={`p-2 rounded-full shadow-md transition-transform focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+                isGuest 
+                  ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                  : 'bg-green-500 hover:bg-green-600 text-white hover:scale-110 focus:ring-green-500'
+              }`}
+              aria-label={isGuest ? "游客模式下无法添加分类" : "添加新分类"}
+              title={isGuest ? "游客模式下无法添加分类，请登录后操作" : "添加新分类"}
             >
               {/* SVG for a Plus Icon (Heroicons example) */}
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
@@ -491,6 +672,13 @@ export default function Home() {
 
           {/* Input Form */}
           <form onSubmit={handleSaveRecord} className="space-y-6">
+            {isGuest && (
+              <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                <p className="text-sm text-yellow-800">
+                  🚫 游客模式下无法添加或编辑记录。如需完整功能，请返回登录页面使用密码登录。
+                </p>
+              </div>
+            )}
             <div>
               <label htmlFor="title" className="block text-sm font-medium text-gray-700 mb-1">
                 标题 <span className="text-red-500">*</span>
@@ -500,8 +688,13 @@ export default function Home() {
                 id="title"
                 value={newTitle}
                 onChange={(e) => setNewTitle(e.target.value)}
-                className="block w-full px-4 py-3 border border-gray-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition-shadow text-gray-900" // <-- Added text-gray-900
-                placeholder="请输入记录标题"
+                disabled={isGuest}
+                className={`block w-full px-4 py-3 border rounded-lg shadow-sm sm:text-sm transition-shadow ${
+                  isGuest 
+                    ? 'border-gray-300 bg-gray-100 text-gray-500 cursor-not-allowed' 
+                    : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500 text-gray-900'
+                }`}
+                placeholder={isGuest ? "游客模式下无法编辑" : "请输入记录标题"}
               />
             </div>
 
@@ -513,9 +706,14 @@ export default function Home() {
                 id="content"
                 value={newContent}
                 onChange={(e) => setNewContent(e.target.value)}
+                disabled={isGuest}
                 rows="5"
-                className="block w-full px-4 py-3 border border-gray-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition-shadow text-gray-900" // <-- Added text-gray-900
-                placeholder="请输入学习内容..."
+                className={`block w-full px-4 py-3 border rounded-lg shadow-sm sm:text-sm transition-shadow ${
+                  isGuest 
+                    ? 'border-gray-300 bg-gray-100 text-gray-500 cursor-not-allowed' 
+                    : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500 text-gray-900'
+                }`}
+                placeholder={isGuest ? "游客模式下无法编辑" : "请输入学习内容..."}
               ></textarea>
             </div>
 
@@ -523,7 +721,7 @@ export default function Home() {
             {successMessage && <p className="text-sm text-green-600 bg-green-100 p-3 rounded-md">{successMessage}</p>}
 
             <div className="flex justify-end space-x-3"> {/* Added space-x-3 for button spacing */}
-              {editingRecordId && ( // Show Cancel button only in edit mode
+              {editingRecordId && !isGuest && ( // Show Cancel button only in edit mode and not guest
                 <button
                   type="button" // Important: type="button" to prevent form submission
                   onClick={() => {
@@ -541,32 +739,39 @@ export default function Home() {
               )}
               <button
                 type="submit"
-                disabled={isSubmitting}
-                className={`px-6 py-3 font-semibold rounded-lg shadow-md focus:outline-none focus:ring-2 focus:ring-offset-2 transition-all duration-150 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed
-                            ${editingRecordId
-                    ? 'bg-green-600 hover:bg-green-700 text-white focus:ring-green-500'
-                    : 'bg-blue-600 hover:bg-blue-700 text-white focus:ring-blue-500'}`}
+                disabled={isSubmitting || isGuest}
+                className={`px-6 py-3 font-semibold rounded-lg shadow-md focus:outline-none focus:ring-2 focus:ring-offset-2 transition-all duration-150 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed ${
+                  isGuest 
+                    ? 'bg-gray-400 text-gray-200'
+                    : editingRecordId
+                      ? 'bg-green-600 hover:bg-green-700 text-white focus:ring-green-500'
+                      : 'bg-blue-600 hover:bg-blue-700 text-white focus:ring-blue-500'
+                }`}
+                title={isGuest ? "游客模式下无法保存记录" : ""}
               >
-                {isSubmitting
-                  ? (editingRecordId ? '更新中...' : '保存中...')
-                  : (editingRecordId ? '更新记录' : '保存记录')}
+                {isGuest 
+                  ? '游客模式无法操作'
+                  : isSubmitting
+                    ? (editingRecordId ? '更新中...' : '保存中...')
+                    : (editingRecordId ? '更新记录' : '保存记录')
+                }
               </button>
             </div>
           </form>
           <div className="mt-12 p-6 md:p-8 bg-white shadow-xl rounded-xl">
             <h2 className="text-xl md:text-2xl font-semibold mb-6 text-gray-800 border-b pb-3">
-              导出学习记录
+              导出和总结
             </h2>
-            <div className="items-center space-y-4 md:space-y-0 md:flex md:space-x-4"> {/* Adjusted for flex layout */}
-              <div className="flex-grow"> {/* Changed flex-1 to flex-grow for better sizing */}
+            <div className="items-center space-y-4 md:space-y-0 md:flex md:space-x-4">
+              <div className="flex-grow">
                 <label htmlFor="exportRange" className="block text-sm font-medium text-gray-700 mb-1">
-                  选择导出范围
+                  选择范围
                 </label>
                 <select
                   id="exportRange"
                   value={selectedExportRange}
                   onChange={(e) => setSelectedExportRange(e.target.value)}
-                  className="block w-full px-3 py-2.5 border border-gray-300 bg-white rounded-lg shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-gray-900"
+                  className="block w-full px-3 py-2.5 border border-gray-300 bg-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-gray-900 rounded-lg shadow-sm sm:text-sm"
                 >
                   {exportRangeOptions.map(option => (
                     <option key={option.value} value={option.value}>
@@ -575,17 +780,31 @@ export default function Home() {
                   ))}
                 </select>
               </div>
-              <div className="pt-5 md:pt-0 self-end"> {/* self-end to align button with select bottom */}
+              <div className="pt-5 md:pt-0 self-end flex space-x-3">
                 <button
                   onClick={handleExport}
                   disabled={isExporting}
-                  className="w-full md:w-auto px-6 py-3 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg shadow-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transition-all duration-150 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-6 py-3 font-semibold rounded-lg shadow-md focus:outline-none focus:ring-2 focus:ring-offset-2 transition-all duration-150 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed bg-green-600 hover:bg-green-700 text-white focus:ring-green-500"
                 >
-                  {isExporting ? '导出中...' : '导出为 .md 文件'}
+                  {isExporting 
+                    ? '导出中...' 
+                    : '导出记录'
+                  }
+                </button>
+                <button
+                  onClick={handleSummary}
+                  disabled={isSummarizing}
+                  className="px-6 py-3 font-semibold rounded-lg shadow-md focus:outline-none focus:ring-2 focus:ring-offset-2 transition-all duration-150 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed bg-blue-600 hover:bg-blue-700 text-white focus:ring-blue-500"
+                >
+                  {isSummarizing 
+                    ? '生成中...' 
+                    : 'AI总结报告'
+                  }
                 </button>
               </div>
             </div>
             {exportError && <p className="mt-3 text-sm text-red-600 bg-red-100 p-3 rounded-md">{exportError}</p>}
+            {summaryError && <p className="mt-3 text-sm text-red-600 bg-red-100 p-3 rounded-md">{summaryError}</p>}
           </div>
 
           {/* This </div> is the closing tag for <div className="w-full max-w-4xl"> */}
@@ -616,16 +835,27 @@ export default function Home() {
                         <div className="flex space-x-2 flex-shrink-0"> {/* Container for buttons */}
                           <button
                             onClick={() => handleEditRecord(record)}
-                            disabled={editingRecordId === record.id}
-                            className="px-3 py-1 text-sm bg-yellow-500 hover:bg-yellow-600 text-white font-semibold rounded-md shadow-sm transition-colors disabled:opacity-50"
+                            disabled={editingRecordId === record.id || isGuest}
+                            className={`px-3 py-1 text-sm font-semibold rounded-md shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                              isGuest 
+                                ? 'bg-gray-400 text-gray-200'
+                                : 'bg-yellow-500 hover:bg-yellow-600 text-white'
+                            }`}
+                            title={isGuest ? "游客模式下无法编辑记录" : "编辑记录"}
                           >
-                            Edit
+                            {isGuest ? '锁定' : 'Edit'}
                           </button>
                           <button
                             onClick={() => handleDeleteRecord(record.id)}
-                            className="px-3 py-1 text-sm bg-red-500 hover:bg-red-600 text-white font-semibold rounded-md shadow-sm transition-colors"
+                            disabled={isGuest}
+                            className={`px-3 py-1 text-sm font-semibold rounded-md shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                              isGuest 
+                                ? 'bg-gray-400 text-gray-200'
+                                : 'bg-red-500 hover:bg-red-600 text-white'
+                            }`}
+                            title={isGuest ? "游客模式下无法删除记录" : "删除记录"}
                           >
-                            Delete
+                            {isGuest ? '锁定' : 'Delete'}
                           </button>
                         </div>
                       </div>
