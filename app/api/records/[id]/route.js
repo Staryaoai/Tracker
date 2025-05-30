@@ -175,10 +175,9 @@ export async function DELETE(request, context) {
   if (isNaN(recordId)) {
     return NextResponse.json({ message: '记录ID无效' }, { status: 400 });
   }
-
   try {
     const result = await sql.query(
-      `DELETE FROM learning_records WHERE id = $1 RETURNING id;`, // RETURNING id helps confirm deletion
+      `DELETE FROM learning_records WHERE id = $1 RETURNING id, title;`, // RETURNING id and title to get the deleted record info
       [recordId]
     );
 
@@ -192,8 +191,10 @@ export async function DELETE(request, context) {
     // it might return an array for RETURNING as well.
 
     let deletedCount = 0;
+    let deletedRecord = null;
     if (Array.isArray(result)) {
         deletedCount = result.length;
+        deletedRecord = result[0]; // Get the first (and should be only) deleted record
     } else if (result && typeof result.rowCount !== 'undefined') {
         deletedCount = result.rowCount;
     }
@@ -204,7 +205,9 @@ export async function DELETE(request, context) {
       return NextResponse.json({ message: '未找到要删除的记录，或记录未被删除' }, { status: 404 });
     }
 
-    return NextResponse.json({ message: `记录 ID ${recordId} 已成功删除` }); // Or return status 204 No Content
+    // Use the record title in the success message
+    const recordTitle = deletedRecord && deletedRecord.title ? deletedRecord.title : `ID ${recordId}`;
+    return NextResponse.json({ message: `记录 (${recordTitle}) 已成功删除` }); // Or return status 204 No Content
   } catch (error) {
     console.error(`删除记录ID ${recordId} 失败:`, error, error.stack);
     return NextResponse.json(
