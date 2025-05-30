@@ -58,19 +58,42 @@ export async function GET(request) {
         const formattedTime = format(new Date(record.created_at), 'yyyy-MM-dd HH:mm:ss');
         contentForAI += `时间: ${formattedTime}\n标题: ${record.title}\n内容: ${record.content || '没有内容'}\n\n---\n\n`;
       }
-    });
-
-    // 调用OpenRouter API
-    const openRouterResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    });    // 调用AI API（支持配置不同的API endpoint和模型）
+    const apiEndpoint = process.env.AI_API_ENDPOINT || 'https://openrouter.ai/api/v1/chat/completions';
+    const aiModel = process.env.AI_MODEL || 'deepseek/deepseek-chat-v3-0324';
+    
+    // 根据不同的API服务设置不同的认证headers
+    const headers = {
+      'Content-Type': 'application/json',
+    };
+    
+    // OpenRouter API
+    if (apiEndpoint.includes('openrouter.ai')) {
+      headers['Authorization'] = `Bearer ${process.env.OPENROUTER_API_KEY}`;
+      headers['HTTP-Referer'] = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
+      headers['X-Title'] = 'Learning Tracker';
+    }
+    // OpenAI API
+    else if (apiEndpoint.includes('api.openai.com')) {
+      headers['Authorization'] = `Bearer ${process.env.OPENAI_API_KEY}`;
+    }
+    // Anthropic API
+    else if (apiEndpoint.includes('api.anthropic.com')) {
+      headers['x-api-key'] = process.env.ANTHROPIC_API_KEY;
+      headers['anthropic-version'] = '2023-06-01';
+    }
+    // 默认使用OpenRouter格式
+    else {
+      headers['Authorization'] = `Bearer ${process.env.OPENROUTER_API_KEY}`;
+      headers['HTTP-Referer'] = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
+      headers['X-Title'] = 'Learning Tracker';
+    }
+    
+    const openRouterResponse = await fetch(apiEndpoint, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000',
-        'X-Title': 'Learning Tracker'
-      },
+      headers,
       body: JSON.stringify({
-        model: 'deepseek/deepseek-chat-v3-0324:free',
+        model: aiModel,
         messages: [
           {
             role: 'system',
@@ -97,19 +120,17 @@ ${contentForAI}
         max_tokens: 4000,
         temperature: 0.7
       })
-    });
-
-    if (!openRouterResponse.ok) {
+    });    if (!openRouterResponse.ok) {
       const errorText = await openRouterResponse.text();
-      console.error('OpenRouter API error:', errorText);
-      throw new Error(`OpenRouter API调用失败: ${openRouterResponse.status} ${errorText}`);
+      console.error('AI API error:', errorText);
+      throw new Error(`AI API调用失败: ${openRouterResponse.status} ${errorText}`);
     }
 
     const aiResponse = await openRouterResponse.json();
-    console.log('OpenRouter response:', aiResponse);
+    console.log('AI API response:', aiResponse);
 
     if (!aiResponse.choices || !aiResponse.choices[0] || !aiResponse.choices[0].message) {
-      throw new Error('OpenRouter API返回格式异常');
+      throw new Error('AI API返回格式异常');
     }
 
     const summary = aiResponse.choices[0].message.content;
