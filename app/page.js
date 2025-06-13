@@ -43,7 +43,7 @@ export default function Home() {
   const router = useRouter(); // Initialize router
   const [isClient, setIsClient] = useState(false); // To ensure sessionStorage is accessed only on client
   const [isGuest, setIsGuest] = useState(false); // Track if current user is a guest
-
+  const [expandedRecords, setExpandedRecords] = useState(new Set()); // Track which records are expanded
 
   // =========== 2. EFFECTS (still hooks, so at top level) ============
   useEffect(() => {
@@ -583,6 +583,45 @@ export default function Home() {
     console.log("Selected category ID:", categoryId);
   };
 
+  // Function to toggle expand/collapse for record content
+  const toggleRecordExpansion = (recordId) => {
+    setExpandedRecords(prevExpanded => {
+      const newExpanded = new Set(prevExpanded);
+      if (newExpanded.has(recordId)) {
+        newExpanded.delete(recordId);
+      } else {
+        newExpanded.add(recordId);
+      }
+      return newExpanded;
+    });
+  };
+
+  // Component for collapsible content
+  const CollapsibleContent = ({ content, recordId, maxLength = 200 }) => {
+    const isExpanded = expandedRecords.has(recordId);
+    const shouldCollapse = content && content.length > maxLength;
+    
+    if (!content) return null;
+    
+    if (!shouldCollapse) {
+      return <p className="mt-2 text-sm text-gray-700 whitespace-pre-wrap">{content}</p>;
+    }
+    
+    const displayContent = isExpanded ? content : content.substring(0, maxLength) + '...';
+    
+    return (
+      <div className="mt-2">
+        <p className="text-sm text-gray-700 whitespace-pre-wrap">{displayContent}</p>
+        <button
+          onClick={() => toggleRecordExpansion(recordId)}
+          className="mt-2 text-blue-600 hover:text-blue-800 text-xs font-medium focus:outline-none focus:underline transition-colors duration-200"
+        >
+          {isExpanded ? '收起' : '展开'}
+        </button>
+      </div>
+    );
+  };
+
   return (
     <main className="flex min-h-screen flex-col items-center p-6 md:p-12">
       <h1 className="text-3xl md:text-4xl font-bold mb-8 text-center">学习记录</h1>
@@ -859,9 +898,11 @@ export default function Home() {
                           </button>
                         </div>
                       </div>
-                      {record.content && (
-                        <p className="mt-2 text-sm text-gray-700 whitespace-pre-wrap">{record.content}</p>
-                      )}
+                      <CollapsibleContent 
+                        content={record.content} 
+                        recordId={record.id} 
+                        maxLength={200} 
+                      />
                       {record.category_name && (
                         <span className="mt-2 inline-block bg-blue-100 text-blue-800 text-xs font-medium mr-2 px-2.5 py-0.5 rounded">
                           {record.category_name}
