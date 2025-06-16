@@ -3,6 +3,10 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation'; // Import useRouter
 import { format, subDays, subMonths, subYears, startOfDay, endOfDay } from 'date-fns';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
 const RECORDS_PER_PAGE = 10; // Match the DEFAULT_RECORDS_LIMIT from backend or choose a value
 
 export default function Home() {
@@ -596,7 +600,7 @@ export default function Home() {
     });
   };
 
-  // Component for collapsible content
+  // Component for collapsible content with Markdown support
   const CollapsibleContent = ({ content, recordId, maxLength = 200 }) => {
     const isExpanded = expandedRecords.has(recordId);
     const shouldCollapse = content && content.length > maxLength;
@@ -604,14 +608,30 @@ export default function Home() {
     if (!content) return null;
     
     if (!shouldCollapse) {
-      return <p className="mt-2 text-sm text-gray-700 whitespace-pre-wrap">{content}</p>;
+      return (
+        <div className="mt-2 prose prose-sm max-w-none prose-headings:text-gray-800 prose-p:text-gray-700 prose-a:text-blue-600 prose-strong:text-gray-800 prose-code:text-pink-600 prose-code:bg-gray-100 prose-code:px-1 prose-code:rounded">
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm, remarkMath]}
+            rehypePlugins={[rehypeKatex]}
+          >
+            {content}
+          </ReactMarkdown>
+        </div>
+      );
     }
     
     const displayContent = isExpanded ? content : content.substring(0, maxLength) + '...';
     
     return (
       <div className="mt-2">
-        <p className="text-sm text-gray-700 whitespace-pre-wrap">{displayContent}</p>
+        <div className="prose prose-sm max-w-none prose-headings:text-gray-800 prose-p:text-gray-700 prose-a:text-blue-600 prose-strong:text-gray-800 prose-code:text-pink-600 prose-code:bg-gray-100 prose-code:px-1 prose-code:rounded">
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm, remarkMath]}
+            rehypePlugins={[rehypeKatex]}
+          >
+            {displayContent}
+          </ReactMarkdown>
+        </div>
         <button
           onClick={() => toggleRecordExpansion(recordId)}
           className="mt-2 text-blue-600 hover:text-blue-800 text-xs font-medium focus:outline-none focus:underline transition-colors duration-200"
